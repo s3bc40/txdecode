@@ -4306,6 +4306,7 @@ name = "txdecode"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "alloy-json-abi",
  "clap",
  "color-eyre",
  "comfy-table",
