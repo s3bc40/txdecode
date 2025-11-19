@@ -1,0 +1,28 @@
+[package]
+name = "txdecode"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Ethereum & Alloy core
+alloy = { version = "1.1.1", features = ["full", "provider-http"] }
+
+# CLI & argument parsing
+clap = { version = "4.5.52", features = ["derive"] }
+
+# Error handling
+color-eyre = "0.6.5"
+eyre = "0.6.12"
+
+# Pretty output
+comfy-table = "7.2.1"
+
+# HTTP client for external APIs (4byte, Etherscan, Sourcify)
+reqwest = { version = "0.12.24", features = ["json"] }
+
+# JSON serialization/deserialization
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+
+# Async runtime
+tokio = { version = "1.48.0", features = ["full"] }
