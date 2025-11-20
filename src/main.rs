@@ -6,6 +6,8 @@ use alloy::{
     primitives::Bytes,
 };
 use alloy_json_abi::Function;
+use clap::Parser;
+use comfy_table::{Attribute, Cell, Color, Table};
 use eyre::{bail, eyre};
 use reqwest::Client;
 use serde::Deserialize;
@@ -35,6 +37,26 @@ struct FourByteSignature {
 struct EtherscanResponse {
     status: String,
     result: String,
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "txdecode", about = "Decode Ethereum transaction calldata", long_about = None)]
+struct Args {
+    /// Transaction hash to decode (fetch from RPC)
+    #[arg(value_name = "TX_HASH")]
+    tx_hash: Option<String>,
+
+    /// Raw calldata in hex format (overrides TX_HASH)
+    #[arg(short, long, value_name = "CALDATA")]
+    input: Option<String>,
+
+    /// RPC endpoint URL
+    #[arg(long, default_value = "https://ethereum-rpc.publicnode.com")]
+    rpc: String,
+
+    /// Etherscan API key for ABI fetching
+    #[arg(long, env = "ETHERSCAN_API_KEY")]
+    etherscan_key: Option<String>,
 }
 
 /// Returns the path to the cache directory, creating it if it doesn't exist.
@@ -165,7 +187,7 @@ async fn decode_calldata(
     calldata: &Bytes,
     contract_address: Option<&str>, // Optional
     etherscan_key: Option<&str>,    // Optional
-) -> eyre::Result<(String, Vec<DynSolValue>)> {
+) -> eyre::Result<(Function, Vec<DynSolValue>)> {
     let sel = selector(calldata)?;
     let signatures = lookup_selector(sel).await?;
 
@@ -190,7 +212,7 @@ async fn decode_calldata(
     for sig in prioritized {
         if let Ok(func) = parse_signature(sig) {
             if let Ok(decoded) = try_decode(&func, calldata) {
-                return Ok((func.name.clone(), decoded));
+                return Ok((func, decoded));
             }
         }
     }
@@ -199,7 +221,7 @@ async fn decode_calldata(
     if let (Some(addr), Some(key)) = (contract_address, etherscan_key) {
         let func = fetch_etherscan_abi(addr, sel, key).await?;
         let decoded = try_decode(&func, calldata)?;
-        return Ok((func.name.clone(), decoded));
+        return Ok((func, decoded));
     }
 
     bail!(
@@ -208,51 +230,109 @@ async fn decode_calldata(
     )
 }
 
-/// Test function to demonstrate decoding
-async fn test_decode(calldata: &Bytes, contract: Option<&str>, api_key: Option<&str>) {
-    println!("Decoding calldata ({} bytes)...\n", calldata.len());
+/// Formats a DynSolValue into a human-readable string.
+fn format_value(value: &DynSolValue) -> String {
+    match value {
+        DynSolValue::Address(addr) => {
+            // Format checksum address
+            let add_str = format!("{:?}", addr);
 
-    match decode_calldata(&calldata, contract, api_key).await {
-        Ok((func_name, params)) => {
-            println!("✅ Decoded using function: {}", func_name);
-            println!("Parameters:");
-            for (i, param) in params.iter().enumerate() {
-                println!("  [{}]: {:?}", i, param);
+            // Check for well-known address
+            if addr.is_zero() {
+                format!("{} (Zero Address)", add_str)
+            } else {
+                add_str
             }
         }
-        Err(e) => println!("❌ Failed to decode calldata: {}", e),
+        DynSolValue::Uint(val, bits) => {
+            // Format bigint with underscores
+            let num_str = val.to_string();
+            if num_str.len() > 6 {
+                // Insert underscores every 3 digits from the right
+                let formatted = num_str
+                    .chars()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .chunks(3)
+                    .map(|chunk| chunk.iter().collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("_")
+                    .chars()
+                    .rev()
+                    .collect::<String>();
+                format!("{} (uint{})", formatted, bits)
+            } else {
+                format!("{} (uint{})", num_str, bits)
+            }
+        }
+        DynSolValue::Bool(b) => format!("{}", b),
+        DynSolValue::Bytes(bytes) => {
+            if bytes.len() <= 32 {
+                format!("0x{}", hex::encode(bytes))
+            } else {
+                format!("0x{}... ({} bytes)", hex::encode(&bytes[..32]), bytes.len())
+            }
+        }
+        _ => format!("{:?}", value),
     }
+}
+
+/// Displays the decoded function name and parameters in a formatted table.
+fn display_decoded(func_name: &str, params: &[DynSolValue], func: &Function) {
+    let mut table = Table::new();
+    table.set_header(vec![
+        Cell::new("Parameter")
+            .fg(Color::Cyan)
+            .add_attribute(Attribute::Bold),
+        Cell::new("Type")
+            .fg(Color::Yellow)
+            .add_attribute(Attribute::Bold),
+        Cell::new("Value")
+            .fg(Color::Green)
+            .add_attribute(Attribute::Bold),
+    ]);
+
+    // Zip parameters with their types from the function ABI
+    for (i, (param, input)) in params.iter().zip(&func.inputs).enumerate() {
+        table.add_row(vec![
+            Cell::new(if input.name.is_empty() {
+                format!("param{}", i)
+            } else {
+                input.name.clone()
+            }),
+            Cell::new(input.ty.to_string()).fg(Color::Yellow),
+            Cell::new(format_value(param)).fg(Color::White),
+        ]);
+    }
+
+    println!("\n✅ Function: {}", func_name);
+    println!("{}", table);
 }
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // for better error reporting
     color_eyre::install()?;
+    let args = Args::parse();
 
-    // Test 1: Simple ERC-20 transfer
-    println!("=== Test 1: ERC-20 transfer (4byte lookup) ===\n");
-    let calldata = hex::decode(
-        "a9059cbb0000000000000000000000000742d35cc6634c0532925a3b844bc9e7595f0beb00000000000000000000000000000000000000000000000000000000000f4240",
-    )?;
-    test_decode(&Bytes::from(calldata), None, None).await;
+    // Decode raw calldata if --input is provided
+    if let Some(input_hex) = args.input {
+        let calldata = hex::decode(input_hex.trim_start_matches("0x"))?;
+        let bytes = Bytes::from(calldata);
 
-    println!("\n{}\n", "=".repeat(60));
+        match decode_calldata(&bytes, None, args.etherscan_key.as_deref()).await {
+            Ok((func, params)) => display_decoded(&func.name, &params, &func),
+            Err(e) => println!("❌ Failed to decode calldata: {}", e),
+        }
+        return Ok(());
+    }
 
-    // Test 2: Custom contract function (requires Etherscan fallback)
-    // Using a less common function that might not be in 4byte
-    println!("=== Test 2: Custom function (Etherscan fallback) ===\n");
-    let custom_calldata =
-        hex::decode("12345678000000000000000000000000000000000000000000000000000000000000002a")?;
+    // TODO: Fetch transaction by hash (Step 10)
+    if let Some(_tx_hash) = args.tx_hash {
+        eprintln!("⚠️  Transaction decoding not yet implemented. Use --input for now.");
+        return Ok(());
+    }
 
-    let etherscan_key = env::var("ETHERSCAN_API_KEY").ok();
-    let contract = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"; // Uniswap V3 Router
-
-    test_decode(
-        &Bytes::from(custom_calldata),
-        Some(contract),
-        etherscan_key.as_deref(),
-    )
-    .await;
-
+    eprintln!("❌ Error: Provide either a transaction hash or --input <calldata>");
     Ok(())
 }
