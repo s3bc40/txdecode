@@ -227,22 +227,10 @@ cargo test
 
 ### Phase 2: Enhancements 🔜
 
-- [ ] Refactor into clean modules
-- [ ] Comprehensive unit tests
-- [ ] Integration tests with mocked APIs
-- [ ] ENS reverse lookups
-- [ ] Token metadata enrichment
-- [ ] Multi-chain support (Arbitrum, Base, Optimism, Polygon)
-- [ ] Configuration file support
-
-### Phase 3: Advanced Features 🚀
-
-- [ ] Internal call tracing (`debug_traceTransaction`)
-- [ ] Batch transaction decoding
-- [ ] Export to JSON/CSV
-- [ ] Web UI (optional)
-- [ ] GitHub Actions CI/CD
-- [ ] Publish to crates.io
+- [x] Refactor into clean modules
+- [x] Comprehensive unit tests
+- [x] Multi-chain support (Arbitrum, Base, Optimism, Polygon)
+- [x] CLI flags for custom RPC, Etherscan key
 
 ---
 
