@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env, time::Duration};
 
 use alloy::{
     dyn_abi::{DynSolValue, JsonAbiExt},
@@ -7,6 +7,7 @@ use alloy::{
 };
 use alloy_json_abi::Function;
 use eyre::{bail, eyre};
+use reqwest::Client;
 use serde::Deserialize;
 
 // Constants
@@ -30,6 +31,12 @@ struct FourByteSignature {
     text_signature: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct EtherscanResponse {
+    status: String,
+    result: String,
+}
+
 /// Extracts the first four bytes from the given byte slice to use as a function selector.
 fn selector(data: &Bytes) -> eyre::Result<[u8; 4]> {
     data.get(..4)
@@ -46,9 +53,7 @@ async fn lookup_selector(selector: [u8; 4]) -> eyre::Result<Vec<String>> {
         hex_sig
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()?;
+    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
 
     let response: FourByteResponse = client.get(&url).send().await?.json().await?;
 
@@ -82,17 +87,51 @@ fn try_decode(func: &Function, calldata: &Bytes) -> eyre::Result<Vec<DynSolValue
     Ok(decoded)
 }
 
+/// Fetches the ABI from Etherscan for the given contract address and looks for a function
+/// matching the provided selector.
+async fn fetch_etherscan_abi(
+    contract_address: &str,
+    selector: [u8; 4],
+    api_key: &str,
+) -> eyre::Result<Function> {
+    let url = format!(
+        "https://api.etherscan.io/v2/api?module=contract&action=getabi&address={}&apikey={}",
+        contract_address, api_key
+    );
+
+    let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
+
+    let response: EtherscanResponse = client.get(&url).send().await?.json().await?;
+
+    if response.status != "1" {
+        bail!("failed to fetch ABI from Etherscan: {}", response.result);
+    }
+
+    let abi: Vec<Function> = serde_json::from_str(&response.result)
+        .map_err(|e| eyre!("failed to parse ABI JSON: {}", e))?;
+
+    abi.into_iter()
+        .find(|f| f.selector() == selector)
+        .ok_or_else(|| {
+            eyre!(
+                "function with selector 0x{} not found in ABI",
+                hex::encode(selector)
+            )
+        })
+}
+
 /// Decodes the given calldata by looking up possible function signatures and trying to decode
 /// with each until one succeeds.
-async fn decode_calldata(calldata: &Bytes) -> eyre::Result<(String, Vec<DynSolValue>)> {
-    let selector = selector(calldata)?;
-    let signatures = lookup_selector(selector).await?;
+async fn decode_calldata(
+    calldata: &Bytes,
+    contract_address: Option<&str>, // Optional
+    etherscan_key: Option<&str>,    // Optional
+) -> eyre::Result<(String, Vec<DynSolValue>)> {
+    let sel = selector(calldata)?;
+    let signatures = lookup_selector(sel).await?;
 
     if signatures.is_empty() {
-        bail!(
-            "no signatures found for selector 0x{}",
-            hex::encode(selector)
-        );
+        bail!("no signatures found for selector 0x{}", hex::encode(sel));
     }
 
     // Priroritize common signatures (e.g., ERC-20 transfer)
@@ -117,30 +156,24 @@ async fn decode_calldata(calldata: &Bytes) -> eyre::Result<(String, Vec<DynSolVa
         }
     }
 
+    // Fallback to Etherscan ABI if contract address and API key are provided
+    if let (Some(addr), Some(key)) = (contract_address, etherscan_key) {
+        let func = fetch_etherscan_abi(addr, sel, key).await?;
+        let decoded = try_decode(&func, calldata)?;
+        return Ok((func.name.clone(), decoded));
+    }
+
     bail!(
         "all {} signatures failed to decode calldata",
         signatures.len()
     )
 }
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
-    // for better error reporting
-    color_eyre::install()?;
-
-    // Real ERC-20 transfer calldata: transfer(address,uint256)
-    // Selector: 0xa9059cbb
-    // to: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb
-    // amount: 1000000 (1 USDC with 6 decimals)
-    let calldata = hex::decode(
-        "a9059cbb0000000000000000000000000742d35cc6634c0532925a3b844bc9e7595f0beb00000000000000000000000000000000000000000000000000000000000f4240",
-    )?;
-    let calldata = Bytes::from(calldata);
-
+/// Test function to demonstrate decoding
+async fn test_decode(calldata: &Bytes, contract: Option<&str>, api_key: Option<&str>) {
     println!("Decoding calldata ({} bytes)...\n", calldata.len());
 
-    // Attempt to decode the calldata
-    match decode_calldata(&calldata).await {
+    match decode_calldata(&calldata, contract, api_key).await {
         Ok((func_name, params)) => {
             println!("✅ Decoded using function: {}", func_name);
             println!("Parameters:");
@@ -150,6 +183,37 @@ async fn main() -> eyre::Result<()> {
         }
         Err(e) => println!("❌ Failed to decode calldata: {}", e),
     }
+}
+
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    // for better error reporting
+    color_eyre::install()?;
+
+    // Test 1: Simple ERC-20 transfer
+    println!("=== Test 1: ERC-20 transfer (4byte lookup) ===\n");
+    let calldata = hex::decode(
+        "a9059cbb0000000000000000000000000742d35cc6634c0532925a3b844bc9e7595f0beb00000000000000000000000000000000000000000000000000000000000f4240",
+    )?;
+    test_decode(&Bytes::from(calldata), None, None).await;
+
+    println!("\n{}\n", "=".repeat(60));
+
+    // Test 2: Custom contract function (requires Etherscan fallback)
+    // Using a less common function that might not be in 4byte
+    println!("=== Test 2: Custom function (Etherscan fallback) ===\n");
+    let custom_calldata =
+        hex::decode("12345678000000000000000000000000000000000000000000000000000000000000002a")?;
+
+    let etherscan_key = env::var("ETHERSCAN_API_KEY").ok();
+    let contract = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"; // Uniswap V3 Router
+
+    test_decode(
+        &Bytes::from(custom_calldata),
+        Some(contract),
+        etherscan_key.as_deref(),
+    )
+    .await;
 
     Ok(())
 }
