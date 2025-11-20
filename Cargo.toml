@@ -2,6 +2,14 @@
 name = "txdecode"
 version = "0.1.0"
 edition = "2024"
+authors = ["s3bc40 <s3bc40@gmail.com>"]
+description = "A blazingly fast Ethereum transaction decoder CLI built with Alloy"
+repository = "https://github.com/s3bc40/txdecode"
+license = "MIT"
+keywords = ["ethereum", "blockchain", "decoder", "cli", "alloy"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
+readme = "README.md"
+
 
 [dependencies]
 # Ethereum & Alloy core

@@ -17,10 +17,10 @@ struct EtherscanResponse {
 /// Fetches the ABI from Etherscan for the given contract address and looks for a function
 /// matching the provided selector.
 pub async fn fetch_etherscan_abi(
+    chain_id: u64,
     contract_address: &str,
     selector: [u8; 4],
     api_key: &str,
-    chain_id: Option<u32>,
 ) -> eyre::Result<Function> {
     // Check cache first
     if let Some(cached_abi) = cache::load_cache_abi(contract_address) {
@@ -30,10 +30,9 @@ pub async fn fetch_etherscan_abi(
     }
 
     // Fetch from Etherscan
-    let chain = chain_id.unwrap_or(1);
     let url = format!(
         "https://api.etherscan.io/v2/api?module=contract&action=getabi&address={}&apikey={}&chainid={}",
-        contract_address, api_key, chain
+        contract_address, api_key, chain_id
     );
 
     let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
@@ -78,9 +77,7 @@ mod tests {
         // transfer(address,uint256) selector
         let sel = [0xa9, 0x05, 0x9c, 0xbb];
 
-        let func = fetch_etherscan_abi(addr, sel, &api_key, None)
-            .await
-            .unwrap();
+        let func = fetch_etherscan_abi(1, addr, sel, &api_key).await.unwrap();
         assert_eq!(func.name, "transfer");
         assert_eq!(func.inputs.len(), 2);
     }

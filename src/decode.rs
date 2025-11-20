@@ -29,11 +29,13 @@ fn try_decode(func: &Function, calldata: &Bytes) -> eyre::Result<Vec<DynSolValue
 /// with each until one succeeds.
 pub async fn decode_calldata(
     calldata: &Bytes,
-    contract_address: Option<&str>, // Optional
-    etherscan_key: Option<&str>,    // Optional
+    contract_address: Option<&str>,
+    etherscan_key: Option<&str>,
+    chain: Option<u64>,
 ) -> eyre::Result<(Function, Vec<DynSolValue>)> {
     let sel = signatures::selector(calldata)?;
     let signatures = signatures::lookup_selector(sel).await?;
+    let chain_id = chain.unwrap_or(1);
 
     if signatures.is_empty() {
         bail!("no signatures found for selector 0x{}", hex::encode(sel));
@@ -67,7 +69,7 @@ pub async fn decode_calldata(
 
     // Fallback to Etherscan ABI if contract address and API key are provided
     if let (Some(addr), Some(key)) = (contract_address, etherscan_key) {
-        let func = etherscan::fetch_etherscan_abi(addr, sel, key, None).await?;
+        let func = etherscan::fetch_etherscan_abi(chain_id, addr, sel, key).await?;
         let decoded = try_decode(&func, calldata)?;
         return Ok((func, decoded));
     }
@@ -101,7 +103,7 @@ mod tests {
             hex::decode("a9059cbb0000000000000000000000000742d35cc6634c0532925a3b844bc9e7595f0beb00000000000000000000000000000000000000000000000000000000000f4240").unwrap()
         );
 
-        let (func, params) = decode_calldata(&calldata, None, None).await.unwrap();
+        let (func, params) = decode_calldata(&calldata, None, None, None).await.unwrap();
         assert_eq!(func.name, "transfer");
         assert_eq!(params.len(), 2);
     }

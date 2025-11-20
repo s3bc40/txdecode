@@ -48,6 +48,7 @@ async fn fetch_and_decode_tx(
 ) -> eyre::Result<()> {
     let url = Url::parse(rpc_url)?;
     let provider = ProviderBuilder::new().connect_http(url);
+    let chain_id = provider.get_chain_id().await?;
 
     // Fetch the transaction by hash
     let tx_hash = tx_hash.parse()?;
@@ -86,7 +87,14 @@ async fn fetch_and_decode_tx(
 
     // Decode the calldata
     let contract_address = to.map(|addr| format!("{:?}", addr));
-    match decode::decode_calldata(calldata, contract_address.as_deref(), etherscan_key).await {
+    match decode::decode_calldata(
+        calldata,
+        contract_address.as_deref(),
+        etherscan_key,
+        Some(chain_id),
+    )
+    .await
+    {
         Ok((func, params)) => display::display_decoded(&func.name, &params, &func),
         Err(e) => println!("❌ failed to decode calldata after fetch: {}", e),
     }
@@ -105,7 +113,7 @@ async fn main() -> eyre::Result<()> {
         let calldata = hex::decode(input_hex.trim_start_matches("0x"))?;
         let bytes = Bytes::from(calldata);
 
-        match decode::decode_calldata(&bytes, None, args.etherscan_key.as_deref()).await {
+        match decode::decode_calldata(&bytes, None, args.etherscan_key.as_deref(), None).await {
             Ok((func, params)) => display::display_decoded(&func.name, &params, &func),
             Err(e) => println!("❌ failed to decode calldata: {}", e),
         }
