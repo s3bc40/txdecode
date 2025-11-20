@@ -81,6 +81,7 @@ txdecode --rpc https://base.drpc.org 0x9b96d6...
 
 # Optimism
 txdecode --rpc https://mainnet.optimism.io 0xabc...
+```
 
 ---
 
@@ -177,7 +178,7 @@ src/
 ├── cache.rs # Local file cache
 └── display.rs # Pretty table formatting
 
-````
+```
 
 ---
 
@@ -192,7 +193,7 @@ cargo test -- --nocapture
 
 # Test specific function
 cargo test test_selector_extraction
-````
+```
 
 ---
 
