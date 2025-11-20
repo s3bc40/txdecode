@@ -42,7 +42,13 @@ struct EtherscanResponse {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "txdecode", about = "Decode Ethereum transaction calldata", long_about = None)]
+#[command(
+    about = "🔍 Decode EVM transaction calldata",
+    long_about = "🔍 A custom Ethereum transaction decoder built with Alloy.\n\
+                  Supports 4byte.directory lookups, Etherscan ABI fallback, and local caching.",
+    version,
+    author = "s3bc40 <s3bc40@gmail.com>"
+)]
 struct Args {
     /// Transaction hash to decode (fetch from RPC)
     #[arg(value_name = "TX_HASH")]

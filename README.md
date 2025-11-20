@@ -4,74 +4,100 @@ A **blazingly fast** EVM transaction decoder CLI built in Rust, powered exclusiv
 
 Decode any Ethereum transaction or raw calldata into human-readable function calls and parameters — no more squinting at hex blobs.
 
+![txdecode demo](./assets/tx-decode-demo.gif)
+
 ---
 
 ## ✨ Features
 
 - 🚀 **Automatic function signature detection** via [4byte.directory](https://www.4byte.directory/)
-- 🎯 **Smart collision handling** — prioritizes well-known ERC-20/ERC-721 functions
-- 🎨 **Beautiful terminal output** with color-coded tables (coming soon)
+- 🎯 **Smart collision handling** — prioritizes well-known ERC-20/ERC-721 functions over scam signatures
+- 🌐 **Fetch transactions from any RPC** — supports Ethereum mainnet and custom endpoints
+- 📦 **Etherscan ABI fallback** — fetches verified contract ABIs when 4byte lookup fails
+- 💾 **Local ABI cache** — saves fetched ABIs to `~/.txdecode/cache/` for faster repeated lookups
+- 🎨 **Beautiful terminal output** — color-coded tables with formatted values
 - ⚡ **Pure Alloy** — no legacy dependencies (ethers-rs, web3, etc.)
 - 🔒 **Type-safe ABI decoding** with comprehensive error handling
 
 ---
 
-## 🚧 Current Status
+## 🚧 Status
 
-**Working:**
+**✅ Implemented:**
 
-- ✅ Extract 4-byte function selectors
-- ✅ Query 4byte.directory API
-- ✅ Parse Solidity signatures dynamically
-- ✅ Decode calldata with prioritized signature matching
-- ✅ Handle hash collisions (scam/honeypot filters)
+- Extract 4-byte function selectors
+- Query 4byte.directory API with smart prioritization
+- Parse Solidity signatures dynamically
+- Decode calldata with multiple signature attempts
+- Handle hash collisions (filters scam/honeypot functions)
+- Fetch transactions by hash from RPC providers
+- Etherscan verified ABI fallback with caching
+- Human-readable value formatting (addresses, uint256, bytes)
+- Color-coded table output with parameter names
 
-**Coming Soon:**
+**🔜 Coming Soon:**
 
-- 🔜 Fetch transactions from RPC providers
-- 🔜 Etherscan/Sourcify verified ABI fallback
-- 🔜 Local ABI cache
-- 🔜 ENS reverse lookup for addresses
-- 🔜 Token symbol/decimal enrichment
-- 🔜 Multi-chain support (Base, Arbitrum, Optimism, etc.)
-- 🔜 Decode internal calls via `trace_transaction`
+- ENS reverse lookup for addresses
+- Token symbol/decimal enrichment (auto-format `1000000` → `1.0 USDC`)
+- Multi-chain support (Base, Arbitrum, Optimism, Polygon, etc.)
+- Decode internal calls via `debug_traceTransaction`
+- Batch transaction decoding
+- Export decoded data to JSON/CSV
 
 ---
 
 ## 📦 Installation
 
+### From source (recommended)
+
 ```bash
-git clone https://github.com/yourusername/txdecode.git
+git clone https://github.com/s3bc40/txdecode.git
 cd txdecode
 cargo build --release
+sudo cp target/release/txdecode /usr/local/bin/
+```
+
+### Using cargo
+
+```bash
+cargo install --path .
 ```
 
 ---
 
 ## 🎯 Usage
 
-### Decode a transaction by hash (coming soon)
+### Decode a transaction by hash
 
 ```bash
+# Using default RPC (ethereum-rpc.publicnode.com)
+txdecode 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
+
+# Using custom RPC endpoint
+txdecode --rpc https://eth.llamarpc.com 0x5c504ed...
+```
+
+### Decode raw calldata
+
+```bash
+txdecode --input 0xa9059cbb0000000000000000000000000742d35cc6634c0532925a3b844bc9e7595f0beb00000000000000000000000000000000000000000000000000000000000f4240
+```
+
+### Use Etherscan fallback for custom contracts
+
+```bash
+# Set API key via environment variable
+export ETHERSCAN_API_KEY="your_api_key_here"
 txdecode 0x1234...abcd
+
+# Or pass it directly
+txdecode --etherscan-key YOUR_KEY 0x1234...abcd
 ```
 
-### Decode raw calldata (current)
+### Show help
 
 ```bash
-txdecode --input 0xa9059cbb0000000000000000000000000742d35cc...
-```
-
-### Specify RPC endpoint
-
-```bash
-txdecode --rpc https://eth.llamarpc.com 0x1234...abcd
-```
-
-### Use chain presets (coming soon)
-
-```bash
-txdecode --chain base 0x1234...abcd
+txdecode --help
 ```
 
 ---
@@ -85,44 +111,168 @@ txdecode --chain base 0x1234...abcd
 | **RPC provider**          | `alloy::providers`                   |
 | **HTTP client**           | `reqwest`                            |
 | **Error handling**        | `color-eyre`                         |
-| **CLI parsing**           | `clap`                               |
+| **CLI parsing**           | `clap` v4                            |
 | **Pretty tables**         | `comfy-table`                        |
 
 ---
 
 ## 🧪 Example Output
 
+### Simple ETH transfer
+
 ```
-Decoding calldata (68 bytes)...
+📡 Fetched transaction: 0x9de987763c97291e54d9a3aae7c985f1dabbc794e556931f045586ca9af8ca95
+   From: 0x396343362be2a4da1ce0c1c210945346fb82aa49
+   To: 0xe688b84b23f322a994a53dbf8e15fa82cdb71127
+   Value: 11445027713806579 wei
 
-✅ Decoded using function: transfer
+ℹ️  No calldata to decode (empty input).
+```
 
-Parameters:
-  [0]: Address(0x0742d35cc6634c0532925a3b844bc9e7595f0beb)
-  [1]: Uint(1000000, 256)
+### ERC-20 transfer
+
+```
+📡 Fetched transaction: 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
+   From: 0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43
+   To: 0x27054b13b1b798b345b591a4d22e6562d47ea75a
+   Value: 0 wei
+
+✅ Function: transfer
++-----------+---------+--------------------------------------------+
+| Parameter | Type    | Value                                      |
++==================================================================+
+| _to       | address | 0x4fd2b3e5e6f4e4a7c1b1c9d0f9d1a3c5e6f4e4a7 |
+|-----------+---------+--------------------------------------------|
+| _value    | uint256 | 5_000_000_000 (uint256)                    |
++-----------+---------+--------------------------------------------+
+```
+
+### Raw calldata decode
+
+```
+txdecode --input 0xa9059cbb0000000000000000000000000742d35cc6634c0532925a3b844bc9e7595f0beb00000000000000000000000000000000000000000000000000000000000f4240
+
+✅ Function: transfer
++-----------+---------+--------------------------------------------+
+| Parameter | Type    | Value                                      |
++==================================================================+
+| param0    | address | 0x0742d35cc6634c0532925a3b844bc9e7595f0beb |
+|-----------+---------+--------------------------------------------|
+| param1    | uint256 | 1_000_000 (uint256)                        |
++-----------+---------+--------------------------------------------+
+```
+
+---
+
+## 🗂️ Project Structure
+
+```
+txdecode/
+├── src/
+│   └── main.rs          # All-in-one implementation (pre-refactor)
+├── Cargo.toml           # Dependencies and metadata
+├── README.md            # This file
+└── LICENSE              # MIT license
+```
+
+**Post-refactor structure (coming soon):**
+
+```
+src/
+├── main.rs              # CLI entry point
+├── decode.rs            # Core decoding logic
+├── signatures.rs        # 4byte.directory lookups
+├── etherscan.rs         # Etherscan/Sourcify API
+├── cache.rs             # Local file cache
+└── display.rs           # Pretty table formatting
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run unit tests
+cargo test
+
+# Run with verbose output
+cargo test -- --nocapture
+
+# Test specific function
+cargo test test_selector_extraction
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+**Development setup:**
+
+```bash
+git clone https://github.com/s3bc40/txdecode.git
+cd txdecode
+cargo build
+cargo test
 ```
 
 ---
 
 ## 🗺️ Roadmap
 
-1. ✅ **Step 1-4:** Selector extraction + 4byte lookup + signature parsing + decoding
-2. 🔜 **Step 5:** Etherscan/Sourcify verified ABI fallback
-3. 🔜 **Step 6:** Local file cache for fetched ABIs
-4. 🔜 **Step 7:** Value enrichment (ENS, token metadata, formatting)
-5. 🔜 **Step 8:** Gorgeous `comfy-table` output
-6. 🔜 **Step 9:** Full raw calldata input support
-7. 🔜 **Step 10:** Internal call tracing
+### Phase 1: Core Functionality ✅
+
+- [x] Selector extraction
+- [x] 4byte.directory API integration
+- [x] Dynamic signature parsing
+- [x] Collision-resistant decoding
+- [x] RPC transaction fetching
+- [x] Etherscan ABI fallback
+- [x] Local ABI caching
+- [x] Pretty terminal output
+
+### Phase 2: Enhancements 🔜
+
+- [ ] Refactor into clean modules
+- [ ] Comprehensive unit tests
+- [ ] Integration tests with mocked APIs
+- [ ] ENS reverse lookups
+- [ ] Token metadata enrichment
+- [ ] Multi-chain support (Arbitrum, Base, Optimism, Polygon)
+- [ ] Configuration file support
+
+### Phase 3: Advanced Features 🚀
+
+- [ ] Internal call tracing (`debug_traceTransaction`)
+- [ ] Batch transaction decoding
+- [ ] Export to JSON/CSV
+- [ ] Web UI (optional)
+- [ ] GitHub Actions CI/CD
+- [ ] Publish to crates.io
 
 ---
 
 ## 📄 License
 
-MIT
+MIT License - see [LICENSE](LICENSE) file for details
 
 ---
 
 ## 🙏 Acknowledgments
 
-- [Alloy](https://github.com/alloy-rs/alloy) — Modern Ethereum library
-- [4byte.directory](https://www.4byte.directory/) — Function signature database
+- **[Alloy](https://github.com/alloy-rs/alloy)** — The modern, high-performance Ethereum library that powers this tool
+- **[4byte.directory](https://www.4byte.directory/)** — Community-maintained function signature database
+- **[Etherscan](https://etherscan.io/)** — Verified contract ABI source
+
+---
+
+## 💬 Support
+
+- 🐛 [Report a bug](https://github.com/s3bc40/txdecode/issues)
+- 💡 [Request a feature](https://github.com/s3bc40/txdecode/issues)
+- 📧 Email: s3bc40@gmail.com
+
+---
+
+**Built with ❤️ by [s3bc40](https://github.com/s3bc40)**
