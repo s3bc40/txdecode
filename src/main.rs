@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::{env, fs, path::PathBuf, time::Duration};
 
 use alloy::{
     dyn_abi::{DynSolValue, JsonAbiExt},
@@ -35,6 +35,34 @@ struct FourByteSignature {
 struct EtherscanResponse {
     status: String,
     result: String,
+}
+
+/// Returns the path to the cache directory, creating it if it doesn't exist.
+fn cache_dir() -> eyre::Result<PathBuf> {
+    let home = env::var("HOME").or_else(|_| env::var("USERPROFILE"))?;
+    let cache = PathBuf::from(home).join(".txdecode").join("cache");
+    fs::create_dir_all(&cache)?;
+    Ok(cache)
+}
+
+/// Returns the cache file path for a given contract address.
+fn cache_path(address: &str) -> eyre::Result<PathBuf> {
+    Ok(cache_dir()?.join(format!("{}.json", address.to_lowercase())))
+}
+
+/// Loads the cached ABI for the given contract address, if it exists.
+fn load_cache_abi(address: &str) -> Option<Vec<Function>> {
+    let path = cache_path(address).ok()?;
+    let content = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Saves the given ABI to the cache for the specified contract address.
+fn save_cached_abi(address: &str, abi: &[Function]) -> eyre::Result<()> {
+    let path = cache_path(address)?;
+    let json = serde_json::to_string_pretty(abi)?;
+    fs::write(path, json)?;
+    Ok(())
 }
 
 /// Extracts the first four bytes from the given byte slice to use as a function selector.
@@ -94,6 +122,14 @@ async fn fetch_etherscan_abi(
     selector: [u8; 4],
     api_key: &str,
 ) -> eyre::Result<Function> {
+    // Check cache first
+    if let Some(cached_abi) = load_cache_abi(contract_address) {
+        if let Some(func) = cached_abi.iter().find(|f| f.selector() == selector) {
+            return Ok(func.clone());
+        }
+    }
+
+    // Fetch from Etherscan
     let url = format!(
         "https://api.etherscan.io/v2/api?module=contract&action=getabi&address={}&apikey={}",
         contract_address, api_key
@@ -109,6 +145,9 @@ async fn fetch_etherscan_abi(
 
     let abi: Vec<Function> = serde_json::from_str(&response.result)
         .map_err(|e| eyre!("failed to parse ABI JSON: {}", e))?;
+
+    // Cache the ABI for future use
+    save_cached_abi(contract_address, &abi)?;
 
     abi.into_iter()
         .find(|f| f.selector() == selector)
